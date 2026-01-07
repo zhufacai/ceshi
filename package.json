@@ -1,7 +1,7 @@
 {
   "name": "vercel-music-player",
   "version": "1.0.0",
-  "description": "Music player website for GitHub music files",
+  "description": "Modern music player website for GitHub music files with lyrics and album support",
   "main": "index.js",
   "scripts": {
     "build": "node lib/generate-index.js",
