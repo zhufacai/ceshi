@@ -18,7 +18,7 @@ module.exports = async (req, res) => {
   try {
     const {
       GITHUB_REPO = process.env.GITHUB_REPO || '',
-      MUSIC_PATH = process.env.MUSIC_PATH || 'music',
+      MUSIC_PATH = process.env.MUSIC_PATH || '',
       BRANCH = process.env.BRANCH || 'main',
       GITHUB_TOKEN = process.env.GITHUB_TOKEN || ''
     } = req.query;
@@ -36,52 +36,71 @@ module.exports = async (req, res) => {
       headers['Authorization'] = `token ${GITHUB_TOKEN}`;
     }
 
-    // 获取仓库内容
-    const apiUrl = `https://api.github.com/repos/${GITHUB_REPO}/contents/${MUSIC_PATH}?ref=${BRANCH}`;
+    // 构建API URL - 处理MUSIC_PATH为空的情况
+    let apiUrl;
+    if (MUSIC_PATH && MUSIC_PATH.trim() !== '') {
+      apiUrl = `https://api.github.com/repos/${GITHUB_REPO}/contents/${MUSIC_PATH}?ref=${BRANCH}`;
+    } else {
+      apiUrl = `https://api.github.com/repos/${GITHUB_REPO}/contents?ref=${BRANCH}`;
+    }
+    
+    console.log(`API URL: ${apiUrl}`);
     const response = await fetch(apiUrl, { headers });
 
     if (!response.ok) {
       return res.status(response.status).json({
-        error: `GitHub API 错误: ${response.status} ${response.statusText}`
+        error: `GitHub API 错误: ${response.status} ${response.statusText}`,
+        url: apiUrl
       });
     }
 
-    const files = await response.json();
+    const contents = await response.json();
 
-    // 过滤音乐文件
+    // 分离文件夹和文件
+    const folders = contents.filter(item => item.type === 'dir');
+    const files = contents.filter(item => item.type === 'file');
+
+    // 处理根目录下的音乐文件
     const path = require('path');
     const musicExtensions = ['.mp3', '.wav', '.ogg', '.m4a', '.flac', '.aac'];
-    const musicFiles = files.filter(file => {
-      if (file.type !== 'file') return false;
+    const rootMusicFiles = files.filter(file => {
       const ext = path.extname(file.name).toLowerCase();
       return musicExtensions.includes(ext);
     });
 
-    // 生成音乐列表
-    const musicList = musicFiles.map(file => {
-      const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}/${MUSIC_PATH}/${encodeURIComponent(file.name)}`;
-      
-      return {
-        name: file.name,
-        url: rawUrl,
-        size: file.size,
-        type: getContentType(path.extname(file.name)),
-        displayName: path.basename(file.name, path.extname(file.name)).replace(/_/g, ' '),
-        sha: file.sha
-      };
-    });
+    const albums = [];
 
-    // 按文件名排序
-    musicList.sort((a, b) => a.name.localeCompare(b.name));
+    // 添加根目录专辑
+    if (rootMusicFiles.length > 0) {
+      const rootAlbum = {
+        name: '根目录',
+        path: MUSIC_PATH || '',
+        tracks: rootMusicFiles.map(file => {
+          const rawUrl = `https://raw.githubusercontent.com/${GITHUB_REPO}/${BRANCH}/${MUSIC_PATH || ''}${MUSIC_PATH ? '/' : ''}${encodeURIComponent(file.name)}`;
+          
+          return {
+            name: file.name,
+            url: rawUrl,
+            lrcUrl: rawUrl.replace(path.extname(file.name), '.lrc'),
+            size: file.size,
+            type: getContentType(path.extname(file.name)),
+            displayName: path.basename(file.name, path.extname(file.name)).replace(/_/g, ' '),
+            fileName: path.basename(file.name, path.extname(file.name)),
+            id: Math.random().toString(36).substr(2, 9)
+          };
+        })
+      };
+      albums.push(rootAlbum);
+    }
 
     res.status(200).json({
       success: true,
-      count: musicList.length,
+      albums: albums,
+      count: albums.reduce((sum, album) => sum + album.tracks.length, 0),
       repo: GITHUB_REPO,
-      path: MUSIC_PATH,
+      path: MUSIC_PATH || '根目录',
       branch: BRANCH,
-      lastUpdated: new Date().toISOString(),
-      tracks: musicList
+      lastUpdated: new Date().toISOString()
     });
 
   } catch (error) {
